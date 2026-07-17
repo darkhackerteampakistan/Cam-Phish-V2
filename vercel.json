@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Referrer-Policy", "value": "no-referrer-when-downgrade" }
+      ]
+    }
+  ],
+  "functions": {
+    "api/sendMessage.js": { "memory": 128, "maxDuration": 10 },
+    "api/sendPhoto.js": { "memory": 256, "maxDuration": 30 }
+  }
+}
