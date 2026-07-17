@@ -1,0 +1,18 @@
+{
+  "name": "telegram-capture-pro",
+  "version": "3.0.0",
+  "description": "Authorized security testing platform — camera capture with full device fingerprinting and EXIF extraction",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "form-data": "^4.0.1",
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
